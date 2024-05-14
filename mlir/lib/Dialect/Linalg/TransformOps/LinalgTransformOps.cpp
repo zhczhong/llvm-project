@@ -63,8 +63,8 @@ using namespace mlir::transform;
 template <typename PatternTy, typename... Args>
 static FailureOr<LinalgOp> tryApply(Operation *operation, Args &&...args) {
   // Check if the given operation has the type expected by the pattern.
-  using OpTy = typename llvm::function_traits<
-      decltype(&PatternTy::returningMatchAndRewrite)>::template arg_t<0>;
+  using OpTy = typename llvm::function_traits<decltype(
+      &PatternTy::returningMatchAndRewrite)>::template arg_t<0>;
   auto op = dyn_cast<OpTy>(operation);
   if (!op)
     return failure();
@@ -2456,7 +2456,7 @@ DiagnosedSilenceableFailure transform::TileReductionUsingForallOp::applyToOne(
   FailureOr<linalg::ForallReductionTilingResult> result =
       linalg::tileReductionUsingForall(
           rewriter, cast<PartialReductionOpInterface>(target.getOperation()),
-          numThreads, tileSizes, getMapping());
+          numThreads, tileSizes, {}, getMapping());
 
   if (failed(result)) {
     auto diag = emitSilenceableError() << "could not tile reduction";

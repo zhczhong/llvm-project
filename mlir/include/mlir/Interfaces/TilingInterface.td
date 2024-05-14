@@ -176,7 +176,8 @@ def PartialReductionOpInterface : OpInterface<"PartialReductionOpInterface"> {
             "OpBuilder &":$b,
             "Location ":$loc,
             "ArrayRef<OpFoldResult>":$sizes,
-            "ArrayRef<int>":$reductionDim),
+            "ArrayRef<int>":$reductionDim,
+            "ArrayRef<int>":$newParallelDim),
         /*methodBody=*/"",
         /*defaultImplementation=*/[{
           return failure();

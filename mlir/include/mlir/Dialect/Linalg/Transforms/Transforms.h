@@ -905,6 +905,7 @@ FailureOr<ForallReductionTilingResult>
 tileReductionUsingForall(RewriterBase &b, PartialReductionOpInterface op,
                          ArrayRef<OpFoldResult> numThreads,
                          ArrayRef<OpFoldResult> tileSizes = {},
+                         ArrayRef<OpFoldResult> newParallelDims = {},
                          std::optional<ArrayAttr> mapping = std::nullopt);
 
 /// All indices returned by IndexOp should be invariant with respect to

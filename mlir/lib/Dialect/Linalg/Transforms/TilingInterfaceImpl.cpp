@@ -252,10 +252,12 @@ struct LinalgOpPartialReductionInterface
           LinalgOpPartialReductionInterface<LinalgOpTy>, LinalgOpTy> {
   FailureOr<Operation *> generateInitialTensorForPartialReduction(
       Operation *op, OpBuilder &b, Location loc, ArrayRef<OpFoldResult> sizes,
-      ArrayRef<int> reductionDims) const {
+      ArrayRef<int> reductionDims, ArrayRef<int> newParallelDims) const {
     auto linalgOp = cast<LinalgOp>(op);
     OpBuilder::InsertionGuard guard(b);
 
+    if (newParallelDims.empty())
+      newParallelDims = reductionDims;
     if (linalgOp.hasPureBufferSemantics())
       return op->emitOpError("expected operation to have tensor semantics");
     // Insert the new parallel dimension based on the index of the reduction
@@ -288,11 +290,13 @@ struct LinalgOpPartialReductionInterface
     SmallVector<int64_t> newOutputShape;
     SmallVector<Value> dynamicDims;
     int64_t currReductionDims = 0;
-    DenseSet<int> reductionDimsSet(reductionDims.begin(), reductionDims.end());
+    DenseSet<int> newParallelDimsSet(newParallelDims.begin(),
+                                     newParallelDims.end());
     for (int64_t idx :
-         llvm::seq<int64_t>(0, oldShape.size() + reductionDims.size())) {
-      if (reductionDimsSet.contains(idx)) {
-        dispatchIndexOpFoldResults(sizes[idx], dynamicDims, newOutputShape);
+         llvm::seq<int64_t>(0, oldShape.size() + newParallelDims.size())) {
+      if (newParallelDimsSet.contains(idx)) {
+        dispatchIndexOpFoldResults(sizes[reductionDims[currReductionDims]],
+                                   dynamicDims, newOutputShape);
         currReductionDims++;
         continue;
       }
