@@ -275,7 +275,6 @@ static void calculateTileOffsetsAndSizes(
             : makeComposedFoldedAffineApply(
                   b, loc, m.ceilDiv(n),
                   ArrayRef<OpFoldResult>{size, nonZeroNumThreads[threadIdIdx]});
-
     // Dynamic offset shifted by threadId * maxSizePerThread.
     OpFoldResult offsetPerThread = makeComposedFoldedAffineApply(
         b, loc, i + j * m, {offset, threadId, tileSizePerThread});
@@ -611,7 +610,7 @@ tileLinalgOpImpl(RewriterBase &b, LinalgOp op, ArrayRef<OpFoldResult> tileSizes,
 
 FailureOr<linalg::ForallReductionTilingResult> linalg::tileReductionUsingForall(
     RewriterBase &b, PartialReductionOpInterface op,
-    ArrayRef<OpFoldResult> numThreads, ArrayRef<OpFoldResult> tileSizes,
+    ArrayRef<OpFoldResult> threadNums, ArrayRef<OpFoldResult> tileSizes,
     ArrayRef<OpFoldResult> newParallelDims, std::optional<ArrayAttr> mapping) {
   Location loc = op.getLoc();
   OpBuilder::InsertionGuard g(b);
@@ -643,11 +642,26 @@ FailureOr<linalg::ForallReductionTilingResult> linalg::tileReductionUsingForall(
   SmallVector<utils::IteratorType> iterators =
       tilingInterfaceOp.getLoopIteratorTypes();
   SmallVector<int> redDims;
-  {
-    SmallVector<unsigned> redDimsUnsign;
-    linalgOp.getReductionDims(redDimsUnsign);
-    for (auto redIdx : redDimsUnsign) {
-      redDims.emplace_back(redIdx);
+  for (auto [idx, iteratorType] :
+       llvm::enumerate(tilingInterfaceOp.getLoopIteratorTypes())) {
+    if (iteratorType == utils::IteratorType::reduction)
+      redDims.push_back(idx);
+  }
+
+  SmallVector<OpFoldResult> numThreads(threadNums.begin(), threadNums.end());
+  if (numThreads.empty()) {
+    SmallVector<Range> loopRanges = tilingInterfaceOp.getIterationDomain(b);
+    unsigned nLoops = loopRanges.size();
+    numThreads.reserve(nLoops);
+    AffineExpr s0, s1;
+    bindSymbols(b.getContext(), s0, s1);
+    AffineExpr divExpr = s0.ceilDiv(s1);
+    for (const auto &it : llvm::zip(tileSizes, loopRanges)) {
+      OpFoldResult numTiles = std::get<0>(it);
+      if (!isConstantIntValue(numTiles, 0))
+        numTiles = makeComposedFoldedAffineApply(
+            b, op.getLoc(), divExpr, {std::get<1>(it).size, std::get<0>(it)});
+      numThreads.push_back(numTiles);
     }
   }
 
@@ -696,10 +710,14 @@ FailureOr<linalg::ForallReductionTilingResult> linalg::tileReductionUsingForall(
   // 3. Calculate the tile offsets and sizes for the subsequent loop that will
   // be nested under `forallOp`.
   SmallVector<OpFoldResult> tiledOffsets, tiledSizes;
+  std::optional<ArrayRef<OpFoldResult>> nominalTileSizes = std::nullopt;
+  if (!tileSizes.empty() && threadNums.empty()) {
+    nominalTileSizes = tileSizes;
+  }
   calculateTileOffsetsAndSizes(b, loc, forallOp, numThreads, iterationDomain,
                                /*omitTileOffsetBoundsCheck =*/false,
-                               /*nominalTileSizes=*/std::nullopt, tiledOffsets,
-                               tiledSizes);
+                               /*nominalTileSizes=*/nominalTileSizes,
+                               tiledOffsets, tiledSizes);
   // 4. Clone the tileable op and update its destination operands to use the
   // output bbArgs of the ForallOp.
   SmallVector<Value> tilingResults;
@@ -757,7 +775,7 @@ FailureOr<linalg::ForallReductionTilingResult> linalg::tileReductionUsingForall(
       }
     });
     // 5. Tile the cloned op and delete the clone.
-    if (tileSizes.empty()) {
+    if (tileSizes.empty() || threadNums.empty()) {
       FailureOr<TilingResult> tilingResult =
           cast<TilingInterface>(clonedOp).getTiledImplementation(
               b, tiledOffsets, tiledSizes);
